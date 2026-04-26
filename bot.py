@@ -153,6 +153,11 @@ PUT Score: {putScore}
 def home():
     return "Bot is running"
 
+@app.route('/test')
+def test():
+    send_telegram("✅ Bot is working from Render!")
+    return "Test sent"
+
 # ================= START =================
 if __name__ == "__main__":
     t = threading.Thread(target=run_bot)
