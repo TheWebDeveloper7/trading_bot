@@ -261,6 +261,16 @@ def stock_scanner():
 def home():
     return "Bot Running"
 
+@app.route('/test')
+def test():
+    send_telegram("The bot is active and functioning properly.")
+    return "Test Mail Sent. Status 200 OK."
+
+@app.route('/emergency')
+def emergency():
+    send_telegram("There is an error!")
+    return "Emergency"
+
 # ================= START =================
 
 if _name_ == "_main_":
