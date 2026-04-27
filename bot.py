@@ -6,61 +6,37 @@ import requests
 import pandas as pd
 from datetime import datetime
 from kiteconnect import KiteConnect
-import json
 
 # ================= CONFIG =================
 API_KEY = os.getenv("API_KEY")
-API_SECRET = os.getenv("API_SECRET")
+ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-TOKEN_FILE = "token.json"
-
 kite = KiteConnect(api_key=API_KEY)
-
-# ================= TOKEN HANDLING =================
-def load_token():
-    try:
-        if os.path.exists(TOKEN_FILE):
-            with open(TOKEN_FILE, "r") as f:
-                return json.load(f).get("access_token")
-    except:
-        return None
-    return None
-
-
-def save_token(token):
-    with open(TOKEN_FILE, "w") as f:
-        json.dump({"access_token": token}, f)
-
-ACCESS_TOKEN = load_token()
-
-if not ACCESS_TOKEN:
-    print("❌ No ACCESS TOKEN found. Please generate once using login flow.")
-    exit()
-
 kite.set_access_token(ACCESS_TOKEN)
 
-# ================= FLASK =================
 app = Flask(__name__)
 
 # ================= TELEGRAM =================
 def send_telegram(msg):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+    except:
+        pass
 
 def get_time():
     return datetime.now().strftime("%H:%M %p")
 
 # ================= WATCHLIST =================
-
 INDEX_LIST = ["NIFTY 50", "NIFTY BANK", "SENSEX"]
 
 STOCK_LIST = [
     "RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK",
     "SBIN","AXISBANK","LT","ITC","BAJFINANCE",
     "KOTAKBANK","HINDUNILVR","BHARTIARTL","ASIANPAINT",
-    "MARUTI","SUNPHARMA","TITAN","ULTRACEMCO",
+    "MARUTI","SUNPHARMA","TITAN","ULTRACEMRO",
     "NESTLEIND","POWERGRID","NTPC","ONGC","TECHM",
     "WIPRO","HCLTECH","ADANIENT","ADANIPORTS",
     "JSWSTEEL","TATASTEEL","COALINDIA","IOC",
@@ -72,7 +48,6 @@ STOCK_LIST = [
 ]
 
 # ================= INDICATORS =================
-
 def calculate_obv(df):
     obv = [0]
     for i in range(1, len(df)):
@@ -115,7 +90,6 @@ def check_signal(df):
     return bull and cpr < 0.5, bear and cpr < 0.5, last, cpr, roc
 
 # ================= TOKEN FETCH =================
-
 def get_token(symbol):
     try:
         instruments = kite.instruments("NSE")
@@ -127,7 +101,6 @@ def get_token(symbol):
     return None
 
 # ================= INDEX SCANNER (5 MIN) =================
-
 def index_scanner():
     print("📊 Index Scanner Started")
 
@@ -185,7 +158,7 @@ def index_scanner():
 🔴 Signal: OBV Bearish
 📈 Symbol: {idx}
 
-🔹 CPR: {round(cpr,2)}%
+🔹 CPR: {round(cpr,2)}
 🔹 ROC: {round(roc,2)}
 🔹 OBV Trend: Down
 
@@ -201,7 +174,6 @@ def index_scanner():
             time.sleep(60)
 
 # ================= STOCK SCANNER (15 MIN) =================
-
 def stock_scanner():
     print("📈 Stock Scanner Started")
 
@@ -274,12 +246,22 @@ def stock_scanner():
             print("Stock Error:", e)
             time.sleep(60)
 
-# ================= RUN =================
-
+# ================= FLASK =================
 @app.route("/")
 def home():
-    return "🚀 Bot Running Successfully"
+    return "Bot Running"
 
+@app.route("/test")
+def test():
+    send_telegram("Test OK. Bot working well. 200 OK.")
+    return "200 OK"
+
+@app.route('/hello/<msg>')
+def hello(msg):
+    send_telegram(f"{msg}")
+    return f"{msg}"
+
+# ================= START =================
 if __name__ == "__main__":
     t1 = threading.Thread(target=index_scanner)
     t2 = threading.Thread(target=stock_scanner)
