@@ -1,21 +1,12 @@
 from flask import Flask
 import threading
 import time
+import os
 import requests
 import pandas as pd
 from datetime import datetime
 from kiteconnect import KiteConnect
-from token_store import load_token
 import json
-import os
-
-TOKEN_FILE = "token.json"
-
-def load_token():
-    if not os.path.exists(TOKEN_FILE):
-        return None
-    with open(TOKEN_FILE, "r") as f:
-        return json.load(f).get("access_token")
 
 # ================= CONFIG =================
 API_KEY = os.getenv("API_KEY")
@@ -23,16 +14,34 @@ API_SECRET = os.getenv("API_SECRET")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
+TOKEN_FILE = "token.json"
+
 kite = KiteConnect(api_key=API_KEY)
+
+# ================= TOKEN HANDLING =================
+def load_token():
+    try:
+        if os.path.exists(TOKEN_FILE):
+            with open(TOKEN_FILE, "r") as f:
+                return json.load(f).get("access_token")
+    except:
+        return None
+    return None
+
+
+def save_token(token):
+    with open(TOKEN_FILE, "w") as f:
+        json.dump({"access_token": token}, f)
 
 ACCESS_TOKEN = load_token()
 
 if not ACCESS_TOKEN:
-    print("❌ No Access Token Found. Run token generator first.")
+    print("❌ No ACCESS TOKEN found. Please generate once using login flow.")
     exit()
 
 kite.set_access_token(ACCESS_TOKEN)
 
+# ================= FLASK =================
 app = Flask(__name__)
 
 # ================= TELEGRAM =================
@@ -84,8 +93,8 @@ def calculate_cpr(df):
     pivot = (prev["high"] + prev["low"] + prev["close"]) / 3
     bc = (prev["high"] + prev["low"]) / 2
     tc = pivot + (pivot - bc)
-
-    return abs(tc - bc) / pivot * 100
+    width = abs(tc - bc)
+    return (width / pivot) * 100
 
 
 def calculate_roc(df, period=10):
@@ -132,14 +141,13 @@ def index_scanner():
                 if not token:
                     continue
 
-                data = kite.historical_data(
+                df = pd.DataFrame(kite.historical_data(
                     token,
                     from_date="2026-04-25",
                     to_date="2026-04-27",
                     interval="5minute"
-                )
+                ))
 
-                df = pd.DataFrame(data)
                 if len(df) < 30:
                     continue
 
@@ -154,40 +162,36 @@ def index_scanner():
 
                 if bull and last_signal[idx] != "CALL":
 
-                    msg = f"""
+                    send_telegram(f"""
 📊 CPR STRATEGY ALERT
 
 🟢 Signal: OBV Bullish
 📈 Symbol: {idx}
 
-🔹 CPR: {round(cpr,2)}% (Narrow)
+🔹 CPR: {round(cpr,2)}%
 🔹 ROC: {round(roc,2)}
 🔹 OBV Trend: Up
 
 💰 Price: {price}
 ⏰ Time: {get_time()}
-"""
-
-                    send_telegram(msg)
+""")
                     last_signal[idx] = "CALL"
 
                 elif bear and last_signal[idx] != "PUT":
 
-                    msg = f"""
+                    send_telegram(f"""
 📊 CPR STRATEGY ALERT
 
 🔴 Signal: OBV Bearish
 📈 Symbol: {idx}
 
-🔹 CPR: {round(cpr,2)}% (Narrow)
+🔹 CPR: {round(cpr,2)}%
 🔹 ROC: {round(roc,2)}
 🔹 OBV Trend: Down
 
 💰 Price: {price}
 ⏰ Time: {get_time()}
-"""
-
-                    send_telegram(msg)
+""")
                     last_signal[idx] = "PUT"
 
             time.sleep(300)
@@ -211,14 +215,13 @@ def stock_scanner():
                 if not token:
                     continue
 
-                data = kite.historical_data(
+                df = pd.DataFrame(kite.historical_data(
                     token,
                     from_date="2026-04-25",
                     to_date="2026-04-27",
                     interval="15minute"
-                )
+                ))
 
-                df = pd.DataFrame(data)
                 if len(df) < 30:
                     continue
 
@@ -233,40 +236,36 @@ def stock_scanner():
 
                 if bull and last_signal[stock] != "CALL":
 
-                    msg = f"""
+                    send_telegram(f"""
 📊 CPR STRATEGY ALERT
 
 🟢 Signal: OBV Bullish
 📈 Symbol: {stock}
 
-🔹 CPR: {round(cpr,2)}% (Narrow)
+🔹 CPR: {round(cpr,2)}
 🔹 ROC: {round(roc,2)}
 🔹 OBV Trend: Up
 
 💰 Price: {price}
 ⏰ Time: {get_time()}
-"""
-
-                    send_telegram(msg)
+""")
                     last_signal[stock] = "CALL"
 
                 elif bear and last_signal[stock] != "PUT":
 
-                    msg = f"""
+                    send_telegram(f"""
 📊 CPR STRATEGY ALERT
 
 🔴 Signal: OBV Bearish
 📈 Symbol: {stock}
 
-🔹 CPR: {round(cpr,2)}% (Narrow)
+🔹 CPR: {round(cpr,2)}
 🔹 ROC: {round(roc,2)}
 🔹 OBV Trend: Down
 
 💰 Price: {price}
 ⏰ Time: {get_time()}
-"""
-
-                    send_telegram(msg)
+""")
                     last_signal[stock] = "PUT"
 
             time.sleep(300)
@@ -275,25 +274,13 @@ def stock_scanner():
             print("Stock Error:", e)
             time.sleep(60)
 
-# ================= FLASK =================
+# ================= RUN =================
 
 @app.route("/")
 def home():
-    return "🚀 Trading Bot Running"
+    return "🚀 Bot Running Successfully"
 
-@app.route('/test')
-def test():
-    send_telegram("The bot is active and functioning properly.")
-    return "Test Mail Sent. Status 200 OK."
-
-@app.route('/emergency')
-def emergency():
-    send_telegram("There is an error!")
-    return "Emergency"
-
-# ================= START =================
-
-if __name__ == "_main_":
+if __name__ == "__main__":
     t1 = threading.Thread(target=index_scanner)
     t2 = threading.Thread(target=stock_scanner)
 
