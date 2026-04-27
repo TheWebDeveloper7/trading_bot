@@ -16,7 +16,7 @@ CHAT_ID = os.getenv("CHAT_ID")
 kite = KiteConnect(api_key=API_KEY)
 kite.set_access_token(ACCESS_TOKEN)
 
-app = Flask(_name_)
+app = Flask(__name__)
 
 # ================= TELEGRAM =================
 def send_telegram(msg):
@@ -273,7 +273,7 @@ def emergency():
 
 # ================= START =================
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     t1 = threading.Thread(target=index_scanner)
     t2 = threading.Thread(target=stock_scanner)
 
