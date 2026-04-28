@@ -6,6 +6,7 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta
 from kiteconnect import KiteConnect
+import pytz
 
 # ================= CONFIG =================
 API_KEY = os.getenv("API_KEY")
@@ -22,6 +23,18 @@ if not ACCESS_TOKEN:
         time.sleep(60)
 
 kite.set_access_token(ACCESS_TOKEN)
+
+# ================= TIMEZONE =================
+IST = pytz.timezone('Asia/Kolkata')
+
+def get_time():
+    return datetime.now(IST).strftime("%H:%M %p")
+
+def is_market_open():
+    now = datetime.now(IST)
+    start = now.replace(hour=9, minute=15, second=0)
+    end = now.replace(hour=15, minute=30, second=0)
+    return start <= now <= end
 
 # ================= TOKEN CHECK =================
 try:
@@ -60,9 +73,6 @@ def send_telegram(msg):
         requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=5)
     except Exception as e:
         print("Telegram Error:", e)
-
-def get_time():
-    return datetime.now().strftime("%H:%M %p")
 
 # ================= WATCHLIST =================
 STOCK_LIST = [
@@ -130,7 +140,7 @@ def check_signal(df):
 
 # ================= DATE =================
 def get_date_range():
-    to_date = datetime.now()
+    to_date = datetime.now(IST)
     from_date = to_date - timedelta(days=5)
     return from_date, to_date
 
@@ -147,6 +157,11 @@ def index_scanner():
 
     while True:
         try:
+            if not is_market_open():
+                print("⏸ Market Closed (Index)")
+                time.sleep(300)
+                continue
+
             from_date, to_date = get_date_range()
 
             for name, token in INDEX_TOKENS.items():
@@ -208,6 +223,11 @@ def stock_scanner():
 
     while True:
         try:
+            if not is_market_open():
+                print("⏸ Market Closed (Stocks)")
+                time.sleep(300)
+                continue
+
             from_date, to_date = get_date_range()
 
             for stock in STOCK_LIST:
