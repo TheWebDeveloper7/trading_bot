@@ -4,56 +4,47 @@ import time
 import os
 import requests
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from kiteconnect import KiteConnect
-import json
 
 # ================= CONFIG =================
 API_KEY = os.getenv("API_KEY")
-API_SECRET = os.getenv("API_SECRET")
+ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-TOKEN_FILE = "token.json"
-
 kite = KiteConnect(api_key=API_KEY)
 
-# ================= TOKEN HANDLING =================
-def load_token():
-    try:
-        if os.path.exists(TOKEN_FILE):
-            with open(TOKEN_FILE, "r") as f:
-                return json.load(f).get("access_token")
-    except:
-        return None
-    return None
-
-
-def save_token(token):
-    with open(TOKEN_FILE, "w") as f:
-        json.dump({"access_token": token}, f)
-
-ACCESS_TOKEN = load_token()
-
+# ================= SAFE TOKEN HANDLING =================
 if not ACCESS_TOKEN:
-    print("❌ No ACCESS TOKEN found. Please generate once using login flow.")
-    exit()
+    print("❌ ACCESS TOKEN missing")
+    while True:
+        time.sleep(60)
 
 kite.set_access_token(ACCESS_TOKEN)
+
+# ================= LOAD INSTRUMENTS ONCE =================
+try:
+    INSTRUMENTS = kite.instruments("NSE")
+except Exception as e:
+    print("❌ Instrument Load Error:", e)
+    INSTRUMENTS = []
 
 # ================= FLASK =================
 app = Flask(__name__)
 
 # ================= TELEGRAM =================
 def send_telegram(msg):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+    except Exception as e:
+        print("Telegram Error:", e)
 
 def get_time():
     return datetime.now().strftime("%H:%M %p")
 
 # ================= WATCHLIST =================
-
 INDEX_LIST = ["NIFTY 50", "NIFTY BANK", "SENSEX"]
 
 STOCK_LIST = [
@@ -72,7 +63,6 @@ STOCK_LIST = [
 ]
 
 # ================= INDICATORS =================
-
 def calculate_obv(df):
     obv = [0]
     for i in range(1, len(df)):
@@ -115,19 +105,19 @@ def check_signal(df):
     return bull and cpr < 0.5, bear and cpr < 0.5, last, cpr, roc
 
 # ================= TOKEN FETCH =================
-
 def get_token(symbol):
-    try:
-        instruments = kite.instruments("NSE")
-        for i in instruments:
-            if i["tradingsymbol"] == symbol:
-                return i["instrument_token"]
-    except:
-        return None
+    for i in INSTRUMENTS:
+        if i["tradingsymbol"] == symbol:
+            return i["instrument_token"]
     return None
 
-# ================= INDEX SCANNER (5 MIN) =================
+# ================= COMMON DATE RANGE =================
+def get_date_range():
+    to_date = datetime.now()
+    from_date = to_date - timedelta(days=5)
+    return from_date, to_date
 
+# ================= INDEX SCANNER (5 MIN) =================
 def index_scanner():
     print("📊 Index Scanner Started")
 
@@ -135,6 +125,8 @@ def index_scanner():
 
     while True:
         try:
+            from_date, to_date = get_date_range()
+
             for idx in INDEX_LIST:
 
                 token = get_token(idx)
@@ -143,8 +135,8 @@ def index_scanner():
 
                 df = pd.DataFrame(kite.historical_data(
                     token,
-                    from_date="2026-04-25",
-                    to_date="2026-04-27",
+                    from_date=from_date,
+                    to_date=to_date,
                     interval="5minute"
                 ))
 
@@ -152,7 +144,6 @@ def index_scanner():
                     continue
 
                 df = calculate_obv(df)
-
                 bull, bear, last, cpr, roc = check_signal(df)
 
                 price = round(last["close"], 2)
@@ -161,7 +152,6 @@ def index_scanner():
                     last_signal[idx] = ""
 
                 if bull and last_signal[idx] != "CALL":
-
                     send_telegram(f"""
 📊 CPR STRATEGY ALERT
 
@@ -178,7 +168,6 @@ def index_scanner():
                     last_signal[idx] = "CALL"
 
                 elif bear and last_signal[idx] != "PUT":
-
                     send_telegram(f"""
 📊 CPR STRATEGY ALERT
 
@@ -198,10 +187,10 @@ def index_scanner():
 
         except Exception as e:
             print("Index Error:", e)
+            send_telegram(f"❌ Index Error: {e}")
             time.sleep(60)
 
 # ================= STOCK SCANNER (15 MIN) =================
-
 def stock_scanner():
     print("📈 Stock Scanner Started")
 
@@ -209,6 +198,8 @@ def stock_scanner():
 
     while True:
         try:
+            from_date, to_date = get_date_range()
+
             for stock in STOCK_LIST:
 
                 token = get_token(stock)
@@ -217,8 +208,8 @@ def stock_scanner():
 
                 df = pd.DataFrame(kite.historical_data(
                     token,
-                    from_date="2026-04-25",
-                    to_date="2026-04-27",
+                    from_date=from_date,
+                    to_date=to_date,
                     interval="15minute"
                 ))
 
@@ -226,7 +217,6 @@ def stock_scanner():
                     continue
 
                 df = calculate_obv(df)
-
                 bull, bear, last, cpr, roc = check_signal(df)
 
                 price = round(last["close"], 2)
@@ -235,7 +225,6 @@ def stock_scanner():
                     last_signal[stock] = ""
 
                 if bull and last_signal[stock] != "CALL":
-
                     send_telegram(f"""
 📊 CPR STRATEGY ALERT
 
@@ -252,7 +241,6 @@ def stock_scanner():
                     last_signal[stock] = "CALL"
 
                 elif bear and last_signal[stock] != "PUT":
-
                     send_telegram(f"""
 📊 CPR STRATEGY ALERT
 
@@ -272,15 +260,23 @@ def stock_scanner():
 
         except Exception as e:
             print("Stock Error:", e)
+            send_telegram(f"❌ Stock Error: {e}")
             time.sleep(60)
 
-# ================= RUN =================
-
+# ================= FLASK =================
 @app.route("/")
 def home():
     return "🚀 Bot Running Successfully"
 
+@app.route("/test")
+def test():
+    send_telegram("The bot is working alright.")
+    return "Bot is Working"
+
+# ================= START =================
 if __name__ == "__main__":
+    send_telegram("🚀 Trading Bot Started Successfully")
+
     t1 = threading.Thread(target=index_scanner)
     t2 = threading.Thread(target=stock_scanner)
 
