@@ -23,29 +23,14 @@ def send_telegram(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
-    except:
-        pass
+    except Exception as e:
+        print("Telegram Error:", e)
 
 def get_time():
-    return datetime.now().strftime("%H:%M %p")
+    return datetime.now().strftime("%H:%M:%S")
 
 # ================= WATCHLIST =================
-INDEX_LIST = ["NIFTY 50", "NIFTY BANK", "SENSEX"]
-
-STOCK_LIST = [
-    "RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK",
-    "SBIN","AXISBANK","LT","ITC","BAJFINANCE",
-    "KOTAKBANK","HINDUNILVR","BHARTIARTL","ASIANPAINT",
-    "MARUTI","SUNPHARMA","TITAN","ULTRACEMRO",
-    "NESTLEIND","POWERGRID","NTPC","ONGC","TECHM",
-    "WIPRO","HCLTECH","ADANIENT","ADANIPORTS",
-    "JSWSTEEL","TATASTEEL","COALINDIA","IOC",
-    "BPCL","HEROMOTOCO","BAJAJFINSV","EICHERMOT",
-    "GRASIM","CIPLA","DRREDDY","DIVISLAB",
-    "SHRIRAMFIN","INDUSINDBK","HDFCLIFE","SBILIFE",
-    "UPL","APOLLOHOSP","BRITANNIA","TATAMOTORS",
-    "M&M","VEDL"
-]
+STOCK_LIST = ["RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK"]
 
 # ================= INDICATORS =================
 def calculate_obv(df):
@@ -62,32 +47,16 @@ def calculate_obv(df):
     df["obv_ema"] = df["obv"].ewm(span=20).mean()
     return df
 
-
 def calculate_cpr(df):
     prev = df.iloc[-2]
     pivot = (prev["high"] + prev["low"] + prev["close"]) / 3
     bc = (prev["high"] + prev["low"]) / 2
     tc = pivot + (pivot - bc)
-    width = abs(tc - bc)
-    return (width / pivot) * 100
-
+    return abs(tc - bc) / pivot * 100
 
 def calculate_roc(df, period=10):
     return ((df["close"].iloc[-1] - df["close"].iloc[-period]) /
             df["close"].iloc[-period]) * 100
-
-
-def check_signal(df):
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
-
-    bull = prev["obv"] < prev["obv_ema"] and last["obv"] > last["obv_ema"]
-    bear = prev["obv"] > prev["obv_ema"] and last["obv"] < last["obv_ema"]
-
-    cpr = calculate_cpr(df)
-    roc = calculate_roc(df)
-
-    return bull and cpr < 0.5, bear and cpr < 0.5, last, cpr, roc
 
 # ================= TOKEN FETCH =================
 def get_token(symbol):
@@ -96,177 +65,99 @@ def get_token(symbol):
         for i in instruments:
             if i["tradingsymbol"] == symbol:
                 return i["instrument_token"]
-    except:
-        return None
+    except Exception as e:
+        print("Token Error:", e)
     return None
 
-# ================= INDEX SCANNER (5 MIN) =================
-def index_scanner():
-    print("📊 Index Scanner Started")
+# ================= DEBUG SCANNER =================
+def debug_scanner():
+    print("🚀 Debug Scanner Started")
+    send_telegram("🚀 Bot Started - Debug Mode")
 
-    last_signal = {}
-
-    while True:
-        try:
-            for idx in INDEX_LIST:
-
-                token = get_token(idx)
-                if not token:
-                    continue
-
-                df = pd.DataFrame(kite.historical_data(
-                    token,
-                    from_date="2026-04-25",
-                    to_date="2026-04-27",
-                    interval="5minute"
-                ))
-
-                if len(df) < 30:
-                    continue
-
-                df = calculate_obv(df)
-
-                bull, bear, last, cpr, roc = check_signal(df)
-
-                price = round(last["close"], 2)
-
-                if idx not in last_signal:
-                    last_signal[idx] = ""
-
-                if bull and last_signal[idx] != "CALL":
-
-                    send_telegram(f"""
-📊 CPR STRATEGY ALERT
-
-🟢 Signal: OBV Bullish
-📈 Symbol: {idx}
-
-🔹 CPR: {round(cpr,2)}%
-🔹 ROC: {round(roc,2)}
-🔹 OBV Trend: Up
-
-💰 Price: {price}
-⏰ Time: {get_time()}
-""")
-                    last_signal[idx] = "CALL"
-
-                elif bear and last_signal[idx] != "PUT":
-
-                    send_telegram(f"""
-📊 CPR STRATEGY ALERT
-
-🔴 Signal: OBV Bearish
-📈 Symbol: {idx}
-
-🔹 CPR: {round(cpr,2)}
-🔹 ROC: {round(roc,2)}
-🔹 OBV Trend: Down
-
-💰 Price: {price}
-⏰ Time: {get_time()}
-""")
-                    last_signal[idx] = "PUT"
-
-            time.sleep(300)
-
-        except Exception as e:
-            print("Index Error:", e)
-            time.sleep(60)
-
-# ================= STOCK SCANNER (15 MIN) =================
-def stock_scanner():
-    print("📈 Stock Scanner Started")
-
-    last_signal = {}
+    # ✅ CHECK TOKEN
+    try:
+        profile = kite.profile()
+        send_telegram(f"✅ Token OK: {profile['user_name']}")
+    except Exception as e:
+        send_telegram(f"❌ TOKEN ERROR: {e}")
+        return
 
     while True:
         try:
             for stock in STOCK_LIST:
 
+                print(f"🔍 Checking {stock}")
+
                 token = get_token(stock)
+
                 if not token:
+                    print(f"❌ Token not found for {stock}")
                     continue
 
-                df = pd.DataFrame(kite.historical_data(
+                data = kite.historical_data(
                     token,
                     from_date="2026-04-25",
                     to_date="2026-04-27",
-                    interval="15minute"
-                ))
+                    interval="5minute"
+                )
+
+                df = pd.DataFrame(data)
+
+                print(f"{stock} candles: {len(df)}")
 
                 if len(df) < 30:
+                    print(f"⚠️ Not enough data for {stock}")
                     continue
 
                 df = calculate_obv(df)
 
-                bull, bear, last, cpr, roc = check_signal(df)
+                last = df.iloc[-1]
+                prev = df.iloc[-2]
 
-                price = round(last["close"], 2)
+                bull = prev["obv"] < prev["obv_ema"] and last["obv"] > last["obv_ema"]
+                bear = prev["obv"] > prev["obv_ema"] and last["obv"] < last["obv_ema"]
 
-                if stock not in last_signal:
-                    last_signal[stock] = ""
+                cpr = calculate_cpr(df)
+                roc = calculate_roc(df)
 
-                if bull and last_signal[stock] != "CALL":
+                print(f"{stock} | CPR: {round(cpr,2)} | ROC: {round(roc,2)}")
 
-                    send_telegram(f"""
-📊 CPR STRATEGY ALERT
+                # 🚀 DEBUG ALERT (ALWAYS SEND ONCE)
+                send_telegram(f"""
+📊 DEBUG CHECK
 
-🟢 Signal: OBV Bullish
-📈 Symbol: {stock}
-
-🔹 CPR: {round(cpr,2)}
-🔹 ROC: {round(roc,2)}
-🔹 OBV Trend: Up
-
-💰 Price: {price}
-⏰ Time: {get_time()}
+📈 {stock}
+CPR: {round(cpr,2)}
+ROC: {round(roc,2)}
+Bull: {bull}
+Bear: {bear}
+Time: {get_time()}
 """)
-                    last_signal[stock] = "CALL"
 
-                elif bear and last_signal[stock] != "PUT":
+                # OPTIONAL REAL SIGNAL
+                if bull:
+                    send_telegram(f"🟢 REAL SIGNAL: {stock} Bullish")
 
-                    send_telegram(f"""
-📊 CPR STRATEGY ALERT
+                elif bear:
+                    send_telegram(f"🔴 REAL SIGNAL: {stock} Bearish")
 
-🔴 Signal: OBV Bearish
-📈 Symbol: {stock}
+                time.sleep(10)
 
-🔹 CPR: {round(cpr,2)}
-🔹 ROC: {round(roc,2)}
-🔹 OBV Trend: Down
-
-💰 Price: {price}
-⏰ Time: {get_time()}
-""")
-                    last_signal[stock] = "PUT"
-
-            time.sleep(300)
+            time.sleep(60)
 
         except Exception as e:
-            print("Stock Error:", e)
+            print("Loop Error:", e)
+            send_telegram(f"❌ BOT ERROR: {e}")
             time.sleep(60)
 
 # ================= FLASK =================
 @app.route("/")
 def home():
-    return "Bot Running"
-
-@app.route("/test")
-def test():
-    send_telegram("Test OK. Bot working well. 200 OK.")
-    return "200 OK"
-
-@app.route('/hello/<msg>')
-def hello(msg):
-    send_telegram(f"{msg}")
-    return f"{msg}"
+    return "Debug Bot Running"
 
 # ================= START =================
 if __name__ == "__main__":
-    t1 = threading.Thread(target=index_scanner)
-    t2 = threading.Thread(target=stock_scanner)
-
-    t1.start()
-    t2.start()
+    t = threading.Thread(target=debug_scanner)
+    t.start()
 
     app.run(host="0.0.0.0", port=10000)
