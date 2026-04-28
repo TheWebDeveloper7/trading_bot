@@ -263,8 +263,12 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    send_telegram("Bot's running... STATUS 200 OK")
     return "Bot Running"
+
+@app.route("/home/<msg>")
+def hello():
+    send_telegram(f"{msg}")
+    return f"{msg}"
 
 # ================= START =================
 if __name__ == "__main__":
