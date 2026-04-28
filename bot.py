@@ -266,7 +266,7 @@ def home():
     return "Bot Running"
 
 @app.route("/home/<msg>")
-def hello():
+def hello(msg):
     send_telegram(f"{msg}")
     return f"{msg}"
 
