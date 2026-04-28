@@ -15,7 +15,7 @@ CHAT_ID = os.getenv("CHAT_ID")
 
 kite = KiteConnect(api_key=API_KEY)
 
-# ================= SAFE TOKEN HANDLING =================
+# ================= TOKEN SAFETY =================
 if not ACCESS_TOKEN:
     print("❌ ACCESS TOKEN missing")
     while True:
@@ -23,21 +23,41 @@ if not ACCESS_TOKEN:
 
 kite.set_access_token(ACCESS_TOKEN)
 
-# ================= LOAD INSTRUMENTS ONCE =================
+# ================= TOKEN CHECK =================
 try:
-    INSTRUMENTS = kite.instruments("NSE")
+    kite.profile()
+    print("✅ Token Valid")
 except Exception as e:
-    print("❌ Instrument Load Error:", e)
-    INSTRUMENTS = []
+    print("❌ Token Error:", e)
 
-# ================= FLASK =================
-app = Flask(__name__)
+# ================= LOAD INSTRUMENTS =================
+NSE, BSE = [], []
+
+while not NSE:
+    try:
+        NSE = kite.instruments("NSE")
+    except:
+        time.sleep(5)
+
+while not BSE:
+    try:
+        BSE = kite.instruments("BSE")
+    except:
+        time.sleep(5)
+
+print("✅ Instruments Loaded")
+
+# ================= INDEX TOKENS =================
+INDEX_TOKENS = {
+    "NIFTY 50": 256265,
+    "NIFTY BANK": 260105
+}
 
 # ================= TELEGRAM =================
 def send_telegram(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=5)
     except Exception as e:
         print("Telegram Error:", e)
 
@@ -45,8 +65,6 @@ def get_time():
     return datetime.now().strftime("%H:%M %p")
 
 # ================= WATCHLIST =================
-INDEX_LIST = ["NIFTY 50", "NIFTY BANK", "SENSEX"]
-
 STOCK_LIST = [
     "RELIANCE","TCS","INFY","HDFCBANK","ICICIBANK",
     "SBIN","AXISBANK","LT","ITC","BAJFINANCE",
@@ -62,6 +80,17 @@ STOCK_LIST = [
     "M&M","VEDL"
 ]
 
+# ================= TOKEN FETCH =================
+def get_token(symbol):
+    for i in NSE:
+        if i["tradingsymbol"] == symbol:
+            return i["instrument_token"]
+    for i in BSE:
+        if i["tradingsymbol"] == symbol:
+            return i["instrument_token"]
+    print(f"❌ Token not found: {symbol}")
+    return None
+
 # ================= INDICATORS =================
 def calculate_obv(df):
     obv = [0]
@@ -72,25 +101,20 @@ def calculate_obv(df):
             obv.append(obv[-1] - df["volume"].iloc[i])
         else:
             obv.append(obv[-1])
-
     df["obv"] = obv
     df["obv_ema"] = df["obv"].ewm(span=20).mean()
     return df
-
 
 def calculate_cpr(df):
     prev = df.iloc[-2]
     pivot = (prev["high"] + prev["low"] + prev["close"]) / 3
     bc = (prev["high"] + prev["low"]) / 2
     tc = pivot + (pivot - bc)
-    width = abs(tc - bc)
-    return (width / pivot) * 100
-
+    return abs(tc - bc) / pivot * 100
 
 def calculate_roc(df, period=10):
     return ((df["close"].iloc[-1] - df["close"].iloc[-period]) /
             df["close"].iloc[-period]) * 100
-
 
 def check_signal(df):
     last = df.iloc[-1]
@@ -104,43 +128,31 @@ def check_signal(df):
 
     return bull and cpr < 0.5, bear and cpr < 0.5, last, cpr, roc
 
-# ================= TOKEN FETCH =================
-def get_token(symbol):
-    for i in INSTRUMENTS:
-        if i["tradingsymbol"] == symbol:
-            return i["instrument_token"]
-    return None
-
-# ================= COMMON DATE RANGE =================
+# ================= DATE =================
 def get_date_range():
     to_date = datetime.now()
     from_date = to_date - timedelta(days=5)
     return from_date, to_date
 
-# ================= INDEX SCANNER (5 MIN) =================
-def index_scanner():
-    print("📊 Index Scanner Started")
+# ================= HEARTBEAT =================
+def heartbeat():
+    while True:
+        send_telegram("💓 Bot Alive")
+        time.sleep(1800)
 
+# ================= INDEX SCANNER =================
+def index_scanner():
+    send_telegram("📊 Index Scanner Started")
     last_signal = {}
 
     while True:
         try:
             from_date, to_date = get_date_range()
 
-            for idx in INDEX_LIST:
+            for name, token in INDEX_TOKENS.items():
 
-                token = get_token(idx)
-                if not token:
-                    continue
-
-                df = pd.DataFrame(kite.historical_data(
-                    token,
-                    from_date=from_date,
-                    to_date=to_date,
-                    interval="5minute"
-                ))
-
-                if len(df) < 30:
+                df = pd.DataFrame(kite.historical_data(token, from_date, to_date, "5minute"))
+                if len(df) == 0:
                     continue
 
                 df = calculate_obv(df)
@@ -148,15 +160,15 @@ def index_scanner():
 
                 price = round(last["close"], 2)
 
-                if idx not in last_signal:
-                    last_signal[idx] = ""
+                if name not in last_signal:
+                    last_signal[name] = ""
 
-                if bull and last_signal[idx] != "CALL":
+                if bull and last_signal[name] != "CALL":
                     send_telegram(f"""
 📊 CPR STRATEGY ALERT
 
 🟢 Signal: OBV Bullish
-📈 Symbol: {idx}
+📈 Symbol: {name}
 
 🔹 CPR: {round(cpr,2)}%
 🔹 ROC: {round(roc,2)}
@@ -165,14 +177,14 @@ def index_scanner():
 💰 Price: {price}
 ⏰ Time: {get_time()}
 """)
-                    last_signal[idx] = "CALL"
+                    last_signal[name] = "CALL"
 
-                elif bear and last_signal[idx] != "PUT":
+                elif bear and last_signal[name] != "PUT":
                     send_telegram(f"""
 📊 CPR STRATEGY ALERT
 
 🔴 Signal: OBV Bearish
-📈 Symbol: {idx}
+📈 Symbol: {name}
 
 🔹 CPR: {round(cpr,2)}%
 🔹 ROC: {round(roc,2)}
@@ -181,19 +193,17 @@ def index_scanner():
 💰 Price: {price}
 ⏰ Time: {get_time()}
 """)
-                    last_signal[idx] = "PUT"
+                    last_signal[name] = "PUT"
 
             time.sleep(300)
 
         except Exception as e:
-            print("Index Error:", e)
             send_telegram(f"❌ Index Error: {e}")
             time.sleep(60)
 
-# ================= STOCK SCANNER (15 MIN) =================
+# ================= STOCK SCANNER =================
 def stock_scanner():
-    print("📈 Stock Scanner Started")
-
+    send_telegram("📈 Stock Scanner Started")
     last_signal = {}
 
     while True:
@@ -206,14 +216,8 @@ def stock_scanner():
                 if not token:
                     continue
 
-                df = pd.DataFrame(kite.historical_data(
-                    token,
-                    from_date=from_date,
-                    to_date=to_date,
-                    interval="15minute"
-                ))
-
-                if len(df) < 30:
+                df = pd.DataFrame(kite.historical_data(token, from_date, to_date, "15minute"))
+                if len(df) == 0:
                     continue
 
                 df = calculate_obv(df)
@@ -231,7 +235,7 @@ def stock_scanner():
 🟢 Signal: OBV Bullish
 📈 Symbol: {stock}
 
-🔹 CPR: {round(cpr,2)}
+🔹 CPR: {round(cpr,2)}%
 🔹 ROC: {round(roc,2)}
 🔹 OBV Trend: Up
 
@@ -256,31 +260,32 @@ def stock_scanner():
 """)
                     last_signal[stock] = "PUT"
 
+                time.sleep(0.3)
+
             time.sleep(300)
 
         except Exception as e:
-            print("Stock Error:", e)
             send_telegram(f"❌ Stock Error: {e}")
             time.sleep(60)
 
 # ================= FLASK =================
+app = Flask(__name__)
+
 @app.route("/")
 def home():
-    return "🚀 Bot Running Successfully"
+    return "🚀 Bot Running"
 
 @app.route("/test")
 def test():
-    send_telegram("The bot is working alright.")
-    return "Bot is Working"
+    send_telegram("✅ Test Message Successful")
+    return "Test Sent"
 
 # ================= START =================
 if __name__ == "__main__":
-    send_telegram("🚀 Trading Bot Started Successfully")
+    send_telegram("🚀 Trading Bot Started")
 
-    t1 = threading.Thread(target=index_scanner)
-    t2 = threading.Thread(target=stock_scanner)
-
-    t1.start()
-    t2.start()
+    threading.Thread(target=index_scanner, daemon=True).start()
+    threading.Thread(target=stock_scanner, daemon=True).start()
+    threading.Thread(target=heartbeat, daemon=True).start()
 
     app.run(host="0.0.0.0", port=10000)
