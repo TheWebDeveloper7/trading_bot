@@ -255,7 +255,7 @@ def scanner():
             time.sleep(600)
 
         except Exception as e:
-            send_telegram(f"❌ ERROR: {e}")
+            print(f"❌ ERROR: {e}")
             time.sleep(60)
 
 # ================= FLASK =================
